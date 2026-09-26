@@ -1,0 +1,24 @@
+Slide 1
+Título, dataset (Telco Customer Churn), nomes do grupo, modelos usados e um pouco sobre a Telco. Situar quem está assistindo.
+
+Slide 2 — O problema e o dataset
+O que é churn e por que prever é importante pra empresa (retenção). 7043 clientes, 21 colunas, sem dados ausentes nem duplicados — mas com uma inconsistência real: TotalCharges veio como texto em vez de número, corrigida convertendo e preenchendo com 0 os 11 clientes com tenure=0 (contrato recém-assinado, ainda sem fatura fechada).
+
+Slide 3 — Features e o target
+Agrupe os atributos em 3 blocos: demográficas/perfil (gender, SeniorCitizen, Partner, Dependents), serviços contratados (InternetService, Contract, PaymentMethod, etc.) e numéricas (tenure, MonthlyCharges, TotalCharges). Target: Churn (Yes/Cancelou vs. No/Não cancelou), 73,5% x 26,5% — desbalanceamento moderado que justifica usar mais métricas que só acurácia lá na frente.
+
+Slide 4 — Principais achados da EDA
+
+Contract é o atributo que mais separa churn (amplitude 0,40), seguido de InternetService.
+A investigação da fibra óptica: não é porque o cliente é mais novo (tenure 32,8 vs 32,9 meses — hipótese descartada), é parcialmente preço (R$91,50 vs R$58,10) mas principalmente falta de suporte técnico resolvendo problemas (churn cai de 49,4% pra 22,6% entre quem tem fibra e TechSupport). Vale contar como investigação, não só como resultado.
+
+Slide 5 — Preparação e modelos treinados
+Split 80/20 estratificado (mantém a proporção 73,5/26,5 nos dois conjuntos), a feature nova fibra_sem_suporte criada a partir da Hipótese 3, e o pré-processamento (StandardScaler nas numéricas, OneHotEncoder nas categóricas). Depois, listar rapidamente os 6 modelos treinados: Regressão Logística, Árvore de Decisão, Naive Bayes, KNN, Perceptron e MLP.
+
+Slide 6 — Métricas de desempenho
+Aqui entra a tabela ou o gráfico de barras comparando os modelos. Destaque a Regressão Logística como melhor F1 (0,6043, com precisão 0,6542 e recall 0,5615) e comente rapidamente por que acurácia sozinha engana num dataset desbalanceado (um modelo "burro" que sempre chuta "não cancela" já acerta 73,5%).
+
+Slide 7 — Conclusão
+Retomar em 2-3 frases: o pipeline funcionou, a Regressão Logística teve o melhor equilíbrio, e os achados de negócio mais acionáveis (Contract mensal e falta de suporte técnico na fibra são os maiores sinais de risco de cancelamento).
+
+Slide 8 — Perguntas
