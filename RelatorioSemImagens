@@ -1,0 +1,117 @@
+# Relatório Técnico — Previsão de Churn em Clientes de Telecomunicações
+
+**Disciplina:** Inteligência Artificial — Avaliação N2 (1º Bimestre)
+**Professor:** Marcones Cleber Brito da Silva
+**Exercício id=40922**
+
+**Autores:**
+Adriana Kaori Kakazu — 082220004
+Beatriz dos Santos Buglio — 082220028
+Lucas Oliveira Silva — 082220019
+Vitoria Kaori Kuriyama — 082220005
+
+---
+
+## 1. Introdução
+
+O cancelamento de clientes (*churn*) é um dos problemas mais estudados em empresas de serviços por assinatura, já que reter um cliente existente costuma custar menos do que adquirir um novo. Este relatório documenta o desenvolvimento de um modelo de classificação binária capaz de prever, a partir de dados cadastrais e de consumo, se um cliente vai ou não cancelar seu contrato com uma empresa de telecomunicações.
+
+## 2. Objetivo
+
+Treinar e comparar o desempenho de seis algoritmos de classificação supervisionada (Regressão Logística, Árvore de Decisão, Naive Bayes, KNN, Perceptron e uma rede neural MLP) sobre o dataset Telco Customer Churn, selecionando o modelo com melhor equilíbrio entre as métricas de avaliação, e extrair, a partir da análise exploratória, insights de negócio sobre os fatores associados ao cancelamento.
+
+## 3. Descrição do dataset
+
+O dataset utilizado é o **Telco Customer Churn**, disponível em [Modelos_Classificat-rios_IA_N2](https://raw.githubusercontent.com/Lucas-O-S/Modelos_Classificat-rios_IA_N2/main/Telco%20Customer%20Churn.csv), contendo **7.043 registros e 21 colunas**.
+
+As variáveis se dividem em quatro grupos:
+
+- **Identificador:** `customerID` (descartado antes do treino, por não ter valor preditivo).
+- **Atributos demográficos e de perfil:** `gender`, `SeniorCitizen`, `Partner`, `Dependents`.
+- **Atributos de serviços contratados:** `PhoneService`, `MultipleLines`, `InternetService`, `OnlineSecurity`, `OnlineBackup`, `DeviceProtection`, `TechSupport`, `StreamingTV`, `StreamingMovies`, `Contract`, `PaperlessBilling`, `PaymentMethod`.
+- **Atributos numéricos:** `tenure` (meses de relacionamento), `MonthlyCharges` (cobrança mensal), `TotalCharges` (cobrança acumulada).
+- **Target:** `Churn` (`Yes`/`No`), indicando se o cliente cancelou o serviço.
+
+O dataset não apresenta linhas duplicadas nem valores nulos nativos. Entretanto, a coluna `TotalCharges` estava armazenada como texto (`object`) em vez de numérica — uma inconsistência revelada ao comparar seu tipo com o de `MonthlyCharges` (`float64`), apesar de ambas representarem valores monetários. Ao converter `TotalCharges` para número, 11 registros se tornaram `NaN`; todos correspondiam a clientes com `tenure = 0`, ou seja, contratos recém-assinados que ainda não haviam fechado nenhuma fatura. Esses valores foram preenchidos com 0, por se tratar de ausência com causa lógica identificável, e não de dado corrompido.
+
+A distribuição do target mostra um desbalanceamento moderado: **73,46% dos clientes não cancelaram** e **26,54% cancelaram**. Esse desbalanceamento é a principal razão para não avaliar os modelos apenas pela acurácia, adotando também precisão, recall e F1-score.
+
+## 4. Metodologia
+
+### 4.1 Análise exploratória de dados (EDA)
+
+A EDA combinou visualizações e comparações estatísticas diretas entre os grupos que cancelaram e não cancelaram:
+
+- **Boxplots por Churn:** os três atributos numéricos separam claramente os dois grupos. A mediana de `tenure` é de 38 meses entre quem não cancelou, contra apenas 10 meses entre quem cancelou. Em `TotalCharges` o padrão se repete (mediana de 1.679,5 vs. 703,5), reflexo direto do tenure baixo, já que `TotalCharges` é aproximadamente `tenure × MonthlyCharges` acumulado. Já em `MonthlyCharges` a separação vai na direção oposta: quem cancela paga mais por mês (mediana de 79,7 vs. 64,4).
+- **Correlação entre `tenure` e `TotalCharges`:** coeficiente de Pearson de **0,826**, confirmando visualmente (via scatterplot) a relação quase linear entre as duas variáveis, com os cancelamentos concentrados na região de tenure e gasto total baixos.
+- **Amplitude da taxa de churn por atributo categórico** (diferença entre a categoria de maior e menor taxa de churn): `Contract` lidera com amplitude de **0,399**, seguido por `InternetService` (0,345), `OnlineSecurity` (0,344) e `TechSupport` (0,342) — os quatro atributos mais discriminativos do dataset.
+
+### 4.2 Investigação dirigida por hipóteses: por que fibra óptica cancela mais?
+
+Como `InternetService` se mostrou um dos atributos mais associados ao churn, três hipóteses foram testadas sequencialmente para entender por que clientes de fibra óptica cancelam mais do que os de DSL:
+
+1. **Hipótese 1 — clientes mais novos, ainda não fidelizados?** Rejeitada: o tempo médio de casa é praticamente igual entre DSL (32,82 meses) e fibra óptica (32,92 meses).
+2. **Hipótese 2 — é só porque a fibra é mais cara?** A fibra custa em média R$ 91,50/mês contra R$ 58,10 da DSL — um indício de sensibilidade a preço, mas insuficiente isoladamente para explicar o cancelamento.
+3. **Hipótese 3 — problema de qualidade de serviço não resolvida?** Sustentada: dentro do próprio grupo de fibra óptica, ter suporte técnico contratado reduz o churn quase pela metade (**49,4%** sem suporte vs. **22,6%** com suporte). Isso indica que parte do problema não é a fibra em si, mas questões técnicas não resolvidas por falta de suporte.
+
+Essa hipótese confirmada motivou a criação da feature de interação `fibra_sem_suporte` (descrita a seguir).
+
+### 4.3 Preparação dos dados
+
+- **Remoção de colunas:** `customerID` foi descartado por ser apenas identificador.
+- **Binarização do target:** `Churn` convertido de `Yes`/`No` para 1/0.
+- **Divisão treino/teste:** split estratificado de 80/20 (`stratify=y`), garantindo que a proporção de 26,54% de churn se mantivesse em ambos os conjuntos — 5.634 linhas de treino e 1.409 de teste.
+- **Engenharia de features:** criação da variável `fibra_sem_suporte`, que assume 1 quando o cliente tem `InternetService == 'Fiber optic'` e `TechSupport == 'No'` simultaneamente, capturando diretamente o padrão de risco identificado na Hipótese 3.
+- **Pré-processamento:** um `ColumnTransformer` aplicou `StandardScaler` às variáveis numéricas (`tenure`, `MonthlyCharges`, `TotalCharges`, `SeniorCitizen`) e `OneHotEncoder(handle_unknown='ignore')` às variáveis categóricas, permitindo que o conjunto de teste contenha eventuais categorias não vistas no treino sem quebrar o pipeline.
+
+### 4.4 Modelos treinados
+
+Seis classificadores foram treinados sobre os mesmos dados pré-processados:
+
+1. Regressão Logística
+2. Árvore de Decisão (profundidade máxima limitada a 6, para reduzir overfitting)
+3. Naive Bayes (Gaussian)
+4. KNN (k = 15)
+5. Perceptron simples
+6. MLP — rede neural com uma camada oculta de 10 neurônios
+
+## 5. Resultados
+
+As métricas foram calculadas sobre o conjunto de teste (1.409 clientes: 1.035 que não cancelaram e 374 que cancelaram):
+
+| Modelo | Acurácia | Precisão | Recall | F1-score |
+|---|---|---|---|---|
+| Regressão Logística | 0,8048 | 0,6542 | 0,5615 | **0,6043** |
+| Árvore de Decisão | 0,7991 | 0,6391 | 0,5588 | 0,5963 |
+| MLP (rede neural) | 0,7935 | 0,6361 | 0,5187 | 0,5714 |
+| KNN | 0,7842 | 0,6006 | 0,5588 | 0,5789 |
+| Naive Bayes | 0,6906 | 0,4543 | 0,8235 | 0,5856 |
+| Perceptron | 0,7268 | 0,4747 | 0,2754 | 0,3486 |
+
+Matriz de confusão do melhor modelo (Regressão Logística), no formato `[[TN FP] / [FN TP]]`:
+
+```
+[[924 111]
+ [164 210]]
+```
+
+Ou seja: dos 374 clientes que de fato cancelaram, o modelo identificou corretamente 210 (recall de 56,15%); dos 321 clientes que o modelo classificou como propensos a cancelar, 210 de fato cancelaram (precisão de 65,42%).
+
+## 6. Discussão
+
+Uma acurácia alta é enganosamente fácil de atingir neste dataset: como quase 3 em cada 4 clientes não cancelam, um modelo "ingênuo" que sempre previsse "não vai cancelar" já acertaria 73,46% das vezes — sem identificar um único cliente em risco. Por isso a comparação entre modelos priorizou o **F1-score**, que equilibra precisão e recall.
+
+A **Regressão Logística** obteve o melhor F1 (0,6043), com o melhor equilíbrio entre identificar corretamente os clientes que de fato cancelam (recall) e não gerar excesso de falsos alarmes (precisão). A Árvore de Decisão (F1 = 0,5963) teve desempenho muito próximo. O **Naive Bayes** se destacou pelo maior recall (0,8235) — identifica mais clientes em risco — mas ao custo da menor precisão entre os modelos competitivos (0,4543), gerando muitos falsos positivos; pode ser preferível em cenários onde o custo de não identificar um cliente em risco é muito maior do que o custo de uma ação de retenção desnecessária. O **Perceptron** teve o pior desempenho geral, com recall de apenas 0,2754, indicando dificuldade do modelo linear simples em capturar os padrões de churn sem um mecanismo mais robusto de ajuste.
+
+Do ponto de vista de negócio, os achados mais acionáveis da EDA foram: (1) o tipo de contrato (`Contract`) é o principal sinal de risco de cancelamento — clientes em contratos mensais têm taxas de churn muito mais altas do que os de contrato anual/bianual; e (2) entre os clientes de fibra óptica, a ausência de suporte técnico contratado quase dobra a taxa de churn, sugerindo que parte do cancelamento nesse segmento está ligada a problemas técnicos não resolvidos, e não apenas ao preço do serviço.
+
+## 7. Conclusão
+
+Este trabalho percorreu o pipeline completo de um problema de classificação binária aplicado a um caso real de negócio: partiu do dataset bruto, identificou e corrigiu um problema de qualidade de dados (`TotalCharges` armazenado como texto), conduziu uma análise exploratória orientada por hipóteses para entender os fatores associados ao churn, projetou uma feature de interação (`fibra_sem_suporte`) fundamentada nessa análise, e treinou e comparou seis classificadores distintos.
+
+A **Regressão Logística** foi o modelo recomendado, por apresentar o melhor equilíbrio entre as métricas de desempenho. Mais do que o resultado numérico, o processo evidenciou que o tipo de contrato e a falta de suporte técnico em clientes de fibra óptica são os sinais mais fortes de risco de cancelamento — informações que podem orientar diretamente estratégias de retenção da empresa.
+
+## 8. Referências
+
+- Dataset: [Telco Customer Churn](https://raw.githubusercontent.com/Lucas-O-S/Modelos_Classificat-rios_IA_N2/main/Telco%20Customer%20Churn.csv) — repositório [Modelos_Classificat-rios_IA_N2](https://github.com/Lucas-O-S/Modelos_Classificat-rios_IA_N2).
+- Documentação scikit-learn: `sklearn.linear_model`, `sklearn.tree`, `sklearn.naive_bayes`, `sklearn.neighbors`, `sklearn.neural_network`, `sklearn.preprocessing`, `sklearn.compose`.
